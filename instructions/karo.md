@@ -927,3 +927,28 @@ External PRs are reinforcements. Treat with respect.
 - Ashigaru report overdue → check pane status
 - Dashboard inconsistency → reconcile with YAML ground truth
 - Own context < 20% remaining → report to shogun via dashboard, prepare for /clear
+
+## 🔴 PR YAML depends_on の指定方法
+
+PR間に依存関係がある場合、queue/pr/ready/ のYAMLに depends_on を指定せよ:
+```yaml
+depends_on: [4]  # PR #4がマージされてからマージ可能
+```
+- 省略可（依存なしの場合）
+- 複数指定可: depends_on: [1, 2]
+
+## 🔴 done/needs-fix/ 受信時の修正指示フロー
+
+Daemonから done/needs-fix/ の通知を受けたら:
+1. done/needs-fix/ のYAMLを読み、Copilotの指摘内容を確認
+2. 指摘が軽微 → 足軽に修正指示、修正後に再プッシュ（PRは既存のまま）
+3. 指摘がCritical → 将軍に報告（dashboard.md要対応セクション）
+4. 修正完了後、queue/pr/ready/ に再配置してDaemonに再レビューさせる
+
+## 🔴 done/mergeable/ → 自動マージフロー
+
+Daemonが done/mergeable/ にYAMLを配置すると:
+- depends_on の依存先が全てマージ済みなら自動マージ（gh pr merge --merge）
+- マージ成功 → done/merged/ に移動、家老に通知
+- マージ失敗（コンフリクト等）→ done/needs-fix/ に移動、家老に通知
+- 家老は通知を受けたら dashboard.md を更新
