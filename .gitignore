@@ -24,6 +24,8 @@ output/
 queue/research/
 queue/tasks/
 queue/reports/
+queue/pr/
+queue/reviews/
 
 # Memory MCP data (local to each installation)
 memory/

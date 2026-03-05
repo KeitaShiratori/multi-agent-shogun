@@ -93,28 +93,38 @@ files:
   dashboard: dashboard.md
 
 # ペイン設定
-# 通常はペイン番号=足軽番号（shutsujin_departure.shが起動時に保証）
-# ズレが発生した場合は @agent_id で正しいペインを特定できる
+# 3x3グリッド配置（shutsujin_departure.shが起動時に設定）
+# 左列: karo1(0), ashigaru1(1), ashigaru2(2) ← 家老1の部隊
+# 中列: karo2(3), ashigaru3(4), ashigaru4(5) ← 家老2の部隊
+# 右列: karo3(6), ashigaru5(7), ashigaru6(8) ← 家老3の部隊
+#
+# 家老1（karo1）は足軽1-2を統率
+# 家老2（karo2）は足軽3-4を統率
+# 家老3（karo3）は足軽5-6を統率
 panes:
-  shogun: shogun
-  self: multiagent:0.0
-  ashigaru_default:
+  shogun: shogun:main
+  self_karo1: multiagent:agents.0  # 家老1のペイン
+  self_karo2: multiagent:agents.3  # 家老2のペイン
+  self_karo3: multiagent:agents.6  # 家老3のペイン
+  ashigaru_karo1:  # 家老1の直属
     - { id: 1, pane: "multiagent:agents.1" }
     - { id: 2, pane: "multiagent:agents.2" }
-    - { id: 3, pane: "multiagent:agents.3" }
-    - { id: 4, pane: "multiagent:agents.4" }
-    - { id: 5, pane: "multiagent:agents.5" }
-    - { id: 6, pane: "multiagent:agents.6" }
-    - { id: 7, pane: "multiagent:agents.7" }
-    - { id: 8, pane: "multiagent:agents.8" }
+  ashigaru_karo2:  # 家老2の直属
+    - { id: 3, pane: "multiagent:agents.4" }
+    - { id: 4, pane: "multiagent:agents.5" }
+  ashigaru_karo3:  # 家老3の直属
+    - { id: 5, pane: "multiagent:agents.7" }
+    - { id: 6, pane: "multiagent:agents.8" }
   agent_id_lookup: "tmux list-panes -t multiagent:agents -F '#{pane_index}' -f '#{==:#{@agent_id},ashigaru{N}}'"
 
 # send-keys ルール
 send_keys:
   method: two_bash_calls
   to_ashigaru_allowed: true
-  to_shogun_allowed: false  # dashboard.md更新で報告
-  reason_shogun_disabled: "殿の入力中に割り込み防止"
+  to_shogun_allowed: conditional  # cmd全サブタスク完了時のみ許可
+  to_shogun_condition: "cmd の全サブタスクが完了した時点でのみ"
+  to_shogun_target: "shogun:main"
+  to_shogun_reason: "将軍ペイン(shogunセッション)と殿の入力ペイン(multiagentセッション)は別セッション。殿への割り込みは発生しない"
 
 # 足軽の状態確認ルール
 ashigaru_status_check:
@@ -251,9 +261,24 @@ sleep 2
 
 ### ⚠️ 将軍への send-keys は禁止
 
-- 将軍への send-keys は **行わない**
-- 代わりに **dashboard.md を更新** して報告
-- 理由: 殿の入力中に割り込み防止
+- **個別タスク完了時**: 将軍への send-keys は **行わない**。dashboard.md 更新のみ
+- **cmd全サブタスク完了時**: dashboard.md を更新した後、将軍に send-keys で完了通知を送る
+
+#### 完了通知の送り方
+**【1回目】**
+```bash
+tmux send-keys -t shogun:0.0 'cmd_XXX 全任務完了。dashboard.md を確認されたし。'
+```
+
+**【2回目】**
+```bash
+tmux send-keys -t shogun:0.0 Enter
+```
+
+#### なぜ将軍への send-keys が許可されるのか
+- 将軍ペイン（shogunセッション）と殿の入力ペイン（multiagentセッション）は **別tmuxセッション**
+- 家老→将軍の send-keys は殿の入力を妨げない
+- 個別タスク完了時は dashboard.md 更新のみ（将軍の処理中に割り込まないため）
 
 ## 🔴 タスク分解の前に、まず考えよ（実行計画の設計）
 
@@ -340,6 +365,7 @@ Claude Codeは「待機」できない。プロンプト待ちは「停止」。
 3. 足軽がsend-keysで起こしてくる
 4. 全報告ファイルをスキャン
 5. 状況把握してから次アクション
+6. 全サブタスクが完了していれば、dashboard.md更新後に将軍へ send-keys で完了通知
 
 ## 🔴 未処理報告スキャン（通信ロスト安全策）
 
@@ -483,6 +509,97 @@ ls -la queue/reports/
 2. **情報集約**: 家老は全足軽の報告を受ける立場
 3. **品質保証**: 更新前に全報告をスキャンし、正確な状況を反映
 
+### 🔴 dashboard.md のスリム化ルール（肥大化防止）
+
+**dashboard.md は「今の状況」を素早く把握するためのファイルである。過去の詳細を溜め込む場所ではない。**
+
+#### 構造（上から順に）
+
+1. **🚨 要対応** — 殿の判断が必要な事項（常に最上部）
+2. **🔄 進行中** — 現在実行中のタスク
+3. **✅ 直近の戦果** — 最新cmd 3件分のみ。要約行のみ（詳細テーブル・備考は書かない）
+4. **🛠️ スキル化候補 / 生成されたスキル** — アクティブなもののみ
+
+#### cmd完了時のアーカイブ手順
+
+cmd完了時は以下を行え:
+
+1. **戦果テーブルに要約行を追加**（時刻・戦場・任務名・結果の1行のみ）
+2. **詳細（総括テーブル・備考）は `archive/cmd_XXX.md` に書き出す**
+   - 保存先: `/mnt/c/tools/multi-agent-shogun/archive/cmd_XXX.md`
+   - 内容: 総括テーブル、画面別結果、備考、スキル化候補詳細
+3. **dashboard.md の戦果が4件以上になったら、古い方から archive に移動**
+   - dashboard.md には常に最新3件分の要約行のみ残す
+4. **対応済みの「🚨 要対応」項目は削除**（対応済みの取り消し線も不要）
+
+#### ❌ やってはいけないこと
+
+- cmd完了時に全画面テーブル・備考をdashboard.mdに展開する
+- 過去の完了タスクの詳細をdashboard.mdに残し続ける
+- 「対応済み」の取り消し線を要対応セクションに残す
+
+#### 目標サイズ
+
+- **dashboard.md は 100行以内を目標とせよ**
+- 100行を超えたら古い戦果・対応済み事項を archive/ に退避
+
+## 🔴 PR作成とPR Review Daemon連携
+
+家老はタスク完了後、PRを作成し、Copilotレビューの自動取得をDaemonに委託せよ。
+
+### PR作成の責務
+
+足軽からタスク完了報告を受けたら、以下を実施：
+
+1. **報告内容の確認**（queue/reports/ashigaru{N}_report.yaml）
+2. **PR作成**（`gh pr create` でテンプレートに従い作成）
+3. **PR Daemon用YAMLの配置**（queue/pr/ready/）
+4. **次タスクの指示に移る**（Daemonからの通知を待たずに）
+
+### PR作成テンプレート
+
+```bash
+gh pr create --title "PR title" --body "$(cat <<'EOF'
+## Background
+<!-- cmdの背景・目的 -->
+
+## Changes
+<!-- 変更内容 -->
+
+## Design Decisions
+<!-- 設計方針と理由 -->
+EOF
+)"
+```
+
+### PR Daemon用YAMLの書き方
+
+ファイル名規則: `pr_{number}_{cmd_id}.yaml`
+
+```yaml
+# queue/pr/ready/pr_5_cmd_137.yaml
+pr_number: 5
+repo: "owner/repo-name"
+cmd_id: cmd_137
+branch: "feature/email-template-fix"
+created_by: karo1
+notify: karo1
+created_at: "2026-03-05T10:00:00"
+```
+
+### Daemonからの通知受信
+
+Daemonが Copilot レビューを取得（または タイムアウト）すると、send-keys で通知が届く。
+
+1. **queue/pr/done/ の該当YAMLを読む**
+2. **status に応じて対応**:
+
+| status | 対応 |
+|--------|------|
+| reviewed (指摘あり) | 足軽に修正指示 |
+| reviewed (指摘なし) | 将軍に完了報告 |
+| no_review | Copilotレビューなし。そのまま将軍に完了報告 |
+
 ## スキル化候補の取り扱い
 
 Ashigaruから報告を受けたら：
@@ -592,7 +709,7 @@ STEP 2: 次タスクYAMLを先に書き込む（YAML先行書き込み原則）
 STEP 3: ペインタイトルをデフォルトに戻す（足軽アイドル確認後に実行）
   └→ 足軽が処理中はClaude Codeがタイトルを上書きするため、アイドル（❯表示）を確認してから実行
   tmux select-pane -t multiagent:0.{N} -T "ashigaru{N} (モデル名)"
-  └→ モデル名は足軽1-4="Sonnet Thinking"、足軽5-8="Opus Thinking"
+  └→ モデル名は足軽1-3="Sonnet Thinking"、足軽4-6="Opus Thinking"
   └→ 昇格中（model_override: opus）なら "Opus Thinking" を使う
 
 STEP 4: /clear を send-keys で送る（2回に分ける）
@@ -668,16 +785,16 @@ tmux send-keys -t multiagent:agents.5 'メッセージ'
 
 | エージェント | モデル | ペイン | 用途 |
 |-------------|--------|-------|------|
-| 将軍 | Opus（思考なし） | shogun:0.0 | 統括・殿との対話 |
-| 家老 | Opus Thinking | multiagent:0.0 | タスク分解・品質管理 |
-| 足軽1-4 | Sonnet Thinking | multiagent:0.1-0.4 | 定型・中程度タスク |
-| 足軽5-8 | Opus Thinking | multiagent:0.5-0.8 | 高難度タスク |
+| 将軍 | Opus（思考なし） | shogun:main | 統括・殿との対話 |
+| 家老1-3 | Opus Thinking | multiagent:agents | タスク分解・品質管理・PR作成 |
+| 足軽1-3 | Sonnet Thinking | multiagent:agents | 定型・中程度タスク |
+| 足軽4-6 | Opus Thinking | multiagent:agents | 高難度タスク |
 
 ### タスク振り分け基準
 
-**デフォルト: 足軽1-4（Sonnet Thinking）に割り当て。** Opus Thinking足軽は必要な場合のみ使用。
+**デフォルト: 足軽1-3（Sonnet Thinking）に割り当て。** Opus Thinking足軽は必要な場合のみ使用。
 
-以下の **Opus必須基準（OC）に2つ以上該当** する場合、足軽5-8（Opus Thinking）に割り当て：
+以下の **Opus必須基準（OC）に2つ以上該当** する場合、足軽4-6（Opus Thinking）に割り当て：
 
 | OC | 基準 | 例 |
 |----|------|-----|
@@ -698,10 +815,10 @@ tmux send-keys -t multiagent:agents.5 'メッセージ'
 
 | 足軽 | デフォルト | 切替方向 | 切替条件 |
 |------|-----------|---------|---------|
-| 足軽1-4 | Sonnet | → Opus に**昇格** | OC基準該当 + Opus足軽が全て使用中 |
-| 足軽5-8 | Opus | → Sonnet に**降格** | OC基準に該当しない軽タスクを振る場合 |
+| 足軽1-3 | Sonnet | → Opus に**昇格** | OC基準該当 + Opus足軽が全て使用中 |
+| 足軽4-6 | Opus | → Sonnet に**降格** | OC基準に該当しない軽タスクを振る場合 |
 
-**重要**: 足軽5-8にタスクを振る際、OC基準に2つ以上該当しないなら**Sonnetに降格してから振れ**。
+**重要**: 足軽4-6にタスクを振る際、OC基準に2つ以上該当しないなら**Sonnetに降格してから振れ**。
 WebSearch/WebFetchでのリサーチ、定型的なドキュメント作成、単純なファイル操作等はSonnetで十分である。
 
 ### `/model` コマンドによる切替手順
@@ -735,16 +852,16 @@ tmux set-option -p -t multiagent:0.6 @model_name 'Sonnet Thinking'
 
 ### モデル昇格プロトコル（Sonnet → Opus）
 
-昇格とは、Sonnet Thinking 足軽（1-4）を一時的に Opus Thinking に切り替えることを指す。
+昇格とは、Sonnet Thinking 足軽（1-3）を一時的に Opus Thinking に切り替えることを指す。
 
 **昇格判断フロー:**
 
 | 状況 | 判断 |
 |------|------|
-| OC基準で2つ以上該当 | 最初から Opus 足軽（5-8）に割り当て。昇格ではない |
+| OC基準で2つ以上該当 | 最初から Opus 足軽（4-6）に割り当て。昇格ではない |
 | OC基準で1つ該当 | Sonnet 足軽に投入。品質不足なら昇格を検討 |
 | Sonnet 足軽が品質不足で報告 | 家老判断で昇格 |
-| 全 Opus 足軽（5-8）が使用中 + 高難度タスクあり | Sonnet 足軽を昇格して対応 |
+| 全 Opus 足軽（4-6）が使用中 + 高難度タスクあり | Sonnet 足軽を昇格して対応 |
 
 **昇格手順:**
 1. `/model opus` を送信（上記3ステップ手順に従う。`@model_name` を `Opus Thinking` に更新）
@@ -757,7 +874,7 @@ tmux set-option -p -t multiagent:0.6 @model_name 'Sonnet Thinking'
 
 ### モデル降格プロトコル（Opus → Sonnet）
 
-降格とは、Opus Thinking 足軽（5-8）を一時的に Sonnet Thinking に切り替えてコストを最適化することを指す。
+降格とは、Opus Thinking 足軽（4-6）を一時的に Sonnet Thinking に切り替えてコストを最適化することを指す。
 
 **降格判断フロー:**
 
@@ -766,7 +883,7 @@ tmux set-option -p -t multiagent:0.6 @model_name 'Sonnet Thinking'
 | タスクがOC基準に1つも該当しない | **降格してから投入** |
 | タスクがOC基準に1つ該当 | Opusのまま投入（判断に迷う場合はOpus維持） |
 | タスクがOC基準に2つ以上該当 | Opusのまま投入 |
-| 全Sonnet足軽（1-4）が使用中 + 軽タスクあり | Opus足軽を降格して対応 |
+| 全Sonnet足軽（1-3）が使用中 + 軽タスクあり | Opus足軽を降格して対応 |
 
 **降格すべきタスクの例:**
 - WebSearch/WebFetchによるリサーチ・情報収集
@@ -807,7 +924,7 @@ task:
 |------|------|
 | フィールド名 | `model_override` |
 | 型 | 文字列（`opus` または `sonnet`） |
-| 省略時 | デフォルトモデル（足軽1-4: Sonnet Thinking、足軽5-8: Opus Thinking） |
+| 省略時 | デフォルトモデル（足軽1-3: Sonnet、足軽4-6: Opus） |
 | 記載者 | 家老のみ（昇格/降格判断時） |
 | 参照者 | 家老のみ（足軽はこのフィールドを参照しない） |
 | 用途 | モデル変更状態の管理・コンパクション復帰時の状態把握 |
@@ -820,8 +937,8 @@ task:
    ```bash
    grep -l "model_override" queue/tasks/ashigaru*.yaml
    ```
-2. `model_override: opus` がある足軽1-4 = 現在昇格中
-3. `model_override: sonnet` がある足軽5-8 = 現在降格中
+2. `model_override: opus` がある足軽1-3 = 現在昇格中
+3. `model_override: sonnet` がある足軽4-6 = 現在降格中
 4. ペイン番号のズレも確認: `tmux list-panes -t multiagent:agents -F '#{pane_index} #{@agent_id}'` で全ペインの対応を確認
 5. 不整合があった場合: `/model <正しいモデル>` を send-keys で送信し、`@model_name` も更新して戻す
 
