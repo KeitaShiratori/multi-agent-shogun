@@ -97,6 +97,7 @@
 !scripts/agent_status.sh
 !scripts/ratelimit_check.sh
 !scripts/switch_cli.sh
+!scripts/pr_review_daemon.sh
 
 
 # SayTask (sample template only, not actual data)
