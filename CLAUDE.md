@@ -4,23 +4,26 @@ version: "3.0"
 updated: "2026-02-07"
 description: "Claude Code + tmux multi-agent parallel dev platform with sengoku military hierarchy"
 
-hierarchy: "Lord (human) → Shogun → Karo → Ashigaru 1-7 / Gunshi"
+hierarchy: "Lord (human) → Shogun → Karo1-3 → Ashigaru 1-6 (each karo has 2 ashigaru)"
 communication: "YAML files + inbox mailbox system (event-driven, NO polling)"
 
 tmux_sessions:
   shogun: { pane_0: shogun }
-  multiagent: { pane_0: karo, pane_1-7: ashigaru1-7, pane_8: gunshi }
+  multiagent: { pane_0: karo1, pane_1: ashigaru1, pane_2: ashigaru2, pane_3: karo2, pane_4: ashigaru3, pane_5: ashigaru4, pane_6: karo3, pane_7: ashigaru5, pane_8: ashigaru6 }
 
 files:
   config: config/projects.yaml          # Project list (summary)
   projects: "projects/<id>.yaml"        # Project details (git-ignored, contains secrets)
-  context: "context/{project}.md"       # Project-specific notes for ashigaru/gunshi
-  cmd_queue: queue/shogun_to_karo.yaml  # Shogun → Karo commands
+  context: "context/{project}.md"       # Project-specific notes for ashigaru
+  cmd_queue_legacy: queue/shogun_to_karo.yaml  # Shogun → Karo commands (旧方式・互換維持)
+  cmd_queue_pending: queue/commands/pending/   # B2: 個別cmdファイル (pending)
+  cmd_queue_active: queue/commands/active/     # B2: 処理中cmdファイル
+  cmd_queue_done: queue/commands/done/         # B2: 完了cmdファイル (アーカイブ)
+  cmd_queue_lib: lib/cmd_queue.sh              # B2: コマンドキュー管理ライブラリ
+  worktree_lib: lib/worktree_manager.sh        # B1: Worktree管理ライブラリ
   tasks: "queue/tasks/ashigaru{N}.yaml" # Karo → Ashigaru assignments (per-ashigaru)
-  gunshi_task: queue/tasks/gunshi.yaml  # Karo → Gunshi strategic assignments
   pending_tasks: queue/tasks/pending.yaml # Karo管理の保留タスク（blocked未割当）
   reports: "queue/reports/ashigaru{N}_report.yaml" # Ashigaru → Karo reports
-  gunshi_report: queue/reports/gunshi_report.yaml  # Gunshi → Karo strategic reports
   dashboard: dashboard.md              # Human-readable summary (secondary data)
   ntfy_inbox: queue/ntfy_inbox.yaml    # Incoming ntfy messages from Lord's phone
 
@@ -62,9 +65,9 @@ language:
 **This is ONE procedure for ALL situations**: fresh start, compaction, session continuation, or any state where you see CLAUDE.md. You cannot distinguish these cases, and you don't need to. **Always follow the same steps.**
 
 1. Identify self: `tmux display-message -t "$TMUX_PANE" -p '#{@agent_id}'`
-2. `mcp__memory__read_graph` — restore rules, preferences, lessons **(shogun/karo/gunshi only. ashigaru skip this step — task YAML is sufficient)**
+2. `mcp__memory__read_graph` — restore rules, preferences, lessons **(shogun/karo only. ashigaru skip this step — task YAML is sufficient)**
 3. **Read `memory/MEMORY.md`** (shogun only) — persistent cross-session memory. If file missing, skip. *Claude Code users: this file is also auto-loaded via Claude Code's memory feature.*
-4. **Read your instructions file**: shogun→`instructions/shogun.md`, karo→`instructions/karo.md`, ashigaru→`instructions/ashigaru.md`, gunshi→`instructions/gunshi.md`. **NEVER SKIP** — even if a conversation summary exists. Summaries do NOT preserve persona, speech style, or forbidden actions.
+4. **Read your instructions file**: shogun→`instructions/shogun.md`, karo→`instructions/karo.md`, ashigaru→`instructions/ashigaru.md`. **NEVER SKIP** — even if a conversation summary exists. Summaries do NOT preserve persona, speech style, or forbidden actions.
 4. Rebuild state from primary YAML data (queue/, tasks/, reports/)
 5. Review forbidden actions, then start work
 
@@ -72,13 +75,13 @@ language:
 
 **CRITICAL**: dashboard.md is secondary data (karo's summary). Primary data = YAML files. Always verify from YAML.
 
-## /clear Recovery (ashigaru/gunshi only)
+## /clear Recovery (ashigaru only)
 
 Lightweight recovery using only CLAUDE.md (auto-loaded). Do NOT read instructions/*.md (cost saving).
 
 ```
-Step 1: tmux display-message -t "$TMUX_PANE" -p '#{@agent_id}' → ashigaru{N} or gunshi
-Step 2: (gunshi only) mcp__memory__read_graph (skip on failure). Ashigaru skip — task YAML is sufficient.
+Step 1: tmux display-message -t "$TMUX_PANE" -p '#{@agent_id}' → ashigaru{N}
+Step 2: Ashigaru skip memory read — task YAML is sufficient.
 Step 3: Read queue/tasks/{your_id}.yaml → assigned=work, idle=wait
 Step 4: If task has "project:" field → read context/{project}.md
         If task has "target_path:" → read that file
@@ -91,7 +94,7 @@ Forbidden after /clear: reading instructions/*.md (1st task), polling (F004), co
 
 ## Summary Generation (compaction)
 
-Always include: 1) Agent role (shogun/karo/ashigaru/gunshi) 2) Forbidden actions list 3) Current task ID (cmd_xxx)
+Always include: 1) Agent role (shogun/karo/ashigaru) 2) Forbidden actions list 3) Current task ID (cmd_xxx)
 
 # Communication Protocol
 
@@ -105,11 +108,11 @@ bash scripts/inbox_write.sh <target_agent> "<message>" <type> <from>
 
 Examples:
 ```bash
-# Shogun → Karo
-bash scripts/inbox_write.sh karo "cmd_048を書いた。実行せよ。" cmd_new shogun
+# Shogun → Karo1
+bash scripts/inbox_write.sh karo1 "cmd_048を書いた。実行せよ。" cmd_new shogun
 
-# Ashigaru → Karo
-bash scripts/inbox_write.sh karo "足軽5号、任務完了。報告YAML確認されたし。" report_received ashigaru5
+# Ashigaru → Karo1
+bash scripts/inbox_write.sh karo1 "足軽5号、任務完了。報告YAML確認されたし。" report_received ashigaru5
 
 # Karo → Ashigaru
 bash scripts/inbox_write.sh ashigaru3 "タスクYAMLを読んで作業開始せよ。" task_assigned karo
@@ -141,7 +144,7 @@ Special cases (CLI commands sent via `tmux send-keys`):
 | 2〜4 min | Escape×2 + nudge | Cursor position bug workaround |
 | 4 min+ | `/clear` sent (max once per 5 min) | Force session reset + YAML re-read |
 
-## Inbox Processing Protocol (karo/ashigaru/gunshi)
+## Inbox Processing Protocol (karo/ashigaru)
 
 When you receive `inboxN` (e.g. `inbox3`):
 1. `Read queue/inbox/{your_id}.yaml`
@@ -175,10 +178,8 @@ Race condition is eliminated: `/clear` wipes old context. Agent re-reads YAML wi
 
 | Direction | Method | Reason |
 |-----------|--------|--------|
-| Ashigaru → Gunshi | Report YAML + inbox_write | Quality check & dashboard aggregation |
-| Gunshi → Karo | Report YAML + inbox_write | Quality check result + strategic reports |
+| Ashigaru → Karo | Report YAML + inbox_write | QC + task management (ashigaru1-2→karo1, ashigaru3-4→karo2, ashigaru5-6→karo3) |
 | Karo → Shogun/Lord | dashboard.md update only | **inbox to shogun FORBIDDEN** — prevents interrupting Lord's input |
-| Karo → Gunshi | YAML + inbox_write | Strategic task or quality check delegation |
 | Top → Down | YAML + inbox_write | Standard wake-up |
 
 ## File Operation Rule
@@ -200,9 +201,9 @@ System manages ALL white-collar work, not just self-improvement. Project folders
 
 # Shogun Mandatory Rules
 
-1. **Dashboard**: Karo + Gunshi update. Gunshi: QC results aggregation. Karo: task status/streaks/action items. Shogun reads it, never writes it.
-2. **Chain of command**: Shogun → Karo → Ashigaru/Gunshi. Never bypass Karo.
-3. **Reports**: Check `queue/reports/ashigaru{N}_report.yaml` and `queue/reports/gunshi_report.yaml` when waiting.
+1. **Dashboard**: Karo updates (task status/streaks/action items). Shogun reads it, never writes it.
+2. **Chain of command**: Shogun → Karo → Ashigaru. Never bypass Karo.
+3. **Reports**: Check `queue/reports/ashigaru{N}_report.yaml` when waiting.
 4. **Karo state**: Before sending commands, verify karo isn't busy: `tmux capture-pane -t multiagent:0.0 -p | tail -20`
 5. **Screenshots**: See `config/settings.yaml` → `screenshot.path`
 6. **Skill candidates**: Ashigaru reports include `skill_candidate:`. Karo collects → dashboard. Shogun approves → creates design doc.
@@ -222,9 +223,9 @@ When processing large datasets (30+ items requiring individual web search, API c
 ## Default Workflow (mandatory for large-scale tasks)
 
 ```
-① Strategy → Gunshi review → incorporate feedback
+① Strategy → Karo review → incorporate feedback
 ② Execute batch1 ONLY → Shogun QC
-③ QC NG → Stop all agents → Root cause analysis → Gunshi review
+③ QC NG → Stop all agents → Root cause analysis → Karo review
    → Fix instructions → Restore clean state → Go to ②
 ④ QC OK → Execute batch2+ (no per-batch QC needed)
 ⑤ All batches complete → Final QC
@@ -238,7 +239,7 @@ When processing large datasets (30+ items requiring individual web search, API c
 3. **Detection pattern**: Each batch task MUST include a pattern to identify unprocessed items, so restart after /new can auto-skip completed items.
 4. **Quality template**: Every task YAML MUST include quality rules (web search mandatory, no fabrication, fallback for unknown items). Never omit — this caused 100% garbage output in past incidents.
 5. **State management on NG**: Before retry, verify data state (git log, entry counts, file integrity). Revert corrupted data if needed.
-6. **Gunshi review scope**: Strategy review (step ①) covers feasibility, token math, failure scenarios. Post-failure review (step ③) covers root cause and fix verification.
+6. **Karo review scope**: Strategy review (step ①) covers feasibility, token math, failure scenarios. Post-failure review (step ③) covers root cause and fix verification.
 
 # Critical Thinking Rule (all agents)
 

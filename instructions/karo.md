@@ -40,7 +40,17 @@ workflow:
     note: "Compress both shogun_to_karo.yaml and inbox to conserve tokens"
   - step: 2
     action: read_yaml
-    target: queue/shogun_to_karo.yaml
+    target: |
+      【B2新方式】個別cmdファイル:
+        source lib/cmd_queue.sh
+        # 自分宛のpendingを確認
+        cmd_pending_for <自分のkaro_id>
+        # 各cmdを読む
+        cmd_read cmd_XXX
+        # 処理開始時にactiveへ移動
+        cmd_activate cmd_XXX <自分のkaro_id>
+      【旧方式互換】queue/shogun_to_karo.yaml
+        → assigned_to が自分のkaro_id (または未設定でkaro1) のpending cmdを処理
   - step: 3
     action: update_dashboard
     target: dashboard.md
@@ -109,19 +119,24 @@ workflow:
     method: "bash scripts/inbox_write.sh"
   - step: 8
     action: check_pending
-    note: "If pending cmds remain in shogun_to_karo.yaml → loop to step 2. Otherwise stop."
-  # NOTE: No background monitor needed. Gunshi sends inbox_write on QC completion.
-  # Ashigaru → Gunshi (quality check) → Karo (notification). Fully event-driven.
+    note: |
+      【B2新方式】cmd_pending_for <karo_id> でpending一覧確認 → あれば step 2 へ
+      【旧方式互換】shogun_to_karo.yaml の自分宛pending確認 → あれば step 2 へ
+      なければ停止（次のinbox wakeup待ち）
+      【B3】cmd 3件処理後にself-/clearチェック（自己コンテキスト予算）:
+        3件処理済み AND no in_progress AND no active tasks AND no unread inbox → self-/clear実施
+  # NOTE: No background monitor needed. Ashigaru sends inbox_write on completion.
+  # Ashigaru → Karo (direct QC). Fully event-driven.
   # === Report Reception Phase ===
   - step: 9
     action: receive_wakeup
-    from: gunshi
+    from: ashigaru
     via: inbox
-    note: "Gunshi reports QC results. Ashigaru no longer reports directly to Karo."
+    note: "Ashigaru reports task completion. Karo performs QC directly."
   - step: 10
     action: scan_all_reports
-    target: "queue/reports/ashigaru*_report.yaml + queue/reports/gunshi_report.yaml"
-    note: "Scan ALL reports (ashigaru + gunshi). Communication loss safety net."
+    target: "queue/reports/ashigaru*_report.yaml"
+    note: "Scan ALL ashigaru reports. Communication loss safety net."
   - step: 11
     action: update_dashboard
     target: dashboard.md
@@ -150,30 +165,44 @@ workflow:
       Same logic as step 8's check_pending, but executed after report reception flow too.
 
 files:
-  input: queue/shogun_to_karo.yaml
+  input_legacy: queue/shogun_to_karo.yaml
+  input_pending: queue/commands/pending/
+  input_active: queue/commands/active/
+  cmd_queue_lib: lib/cmd_queue.sh
+  worktree_lib: lib/worktree_manager.sh
   task_template: "queue/tasks/ashigaru{N}.yaml"
-  gunshi_task: queue/tasks/gunshi.yaml
   report_pattern: "queue/reports/ashigaru{N}_report.yaml"
-  gunshi_report: queue/reports/gunshi_report.yaml
   dashboard: dashboard.md
 
 panes:
-  self: multiagent:0.0
-  ashigaru_default:
-    - { id: 1, pane: "multiagent:0.1" }
-    - { id: 2, pane: "multiagent:0.2" }
-    - { id: 3, pane: "multiagent:0.3" }
-    - { id: 4, pane: "multiagent:0.4" }
-    - { id: 5, pane: "multiagent:0.5" }
-    - { id: 6, pane: "multiagent:0.6" }
-    - { id: 7, pane: "multiagent:0.7" }
-  gunshi: { pane: "multiagent:0.8" }
+  # 自分がkaro1/karo2/karo3かは agent_id で判定:
+  #   tmux display-message -t "$TMUX_PANE" -p '#{@agent_id}'
+  #   karo (karo1): ペイン0 → 足軽1,2 管轄
+  #   karo2:        ペイン3 → 足軽3,4 管轄
+  #   karo3:        ペイン6 → 足軽5,6 管轄
+  karo1:
+    self: "multiagent:agents.0"
+    ashigaru_default: [{ id: 1, pane: "1" }, { id: 2, pane: "2" }]
+  karo2:
+    self: "multiagent:agents.3"
+    ashigaru_default: [{ id: 3, pane: "4" }, { id: 4, pane: "5" }]
+  karo3:
+    self: "multiagent:agents.6"
+    ashigaru_default: [{ id: 5, pane: "7" }, { id: 6, pane: "8" }]
   agent_id_lookup: "tmux list-panes -t multiagent -F '#{pane_index}' -f '#{==:#{@agent_id},ashigaru{N}}'"
 
 inbox:
   write_script: "scripts/inbox_write.sh"
   to_ashigaru: true
   to_shogun: false  # Use dashboard.md instead (interrupt prevention)
+
+# ─── 家老3名体制 ルーティング設計 ───
+# shogun_to_karo.yaml は karo1・karo2・karo3 が共有する。
+# 各家老は assigned_to フィールドで自分宛のcmdのみ処理する:
+#   assigned_to: karo1 (または未設定) → karo1 が処理
+#   assigned_to: karo2               → karo2 が処理
+#   assigned_to: karo3               → karo3 が処理
+# 同一ファイルへの書き込みは flock で競合防止済み (inbox_write.sh)
 
 parallelization:
   independent_tasks: parallel
@@ -320,12 +349,13 @@ Before assigning tasks, ask yourself these five questions:
 task:
   task_id: subtask_001
   parent_cmd: cmd_001
-  bloom_level: L3        # L1-L3=Ashigaru, L4-L6=Gunshi
+  bloom_level: L3        # L1-L6 all routed to Ashigaru
   description: "Create hello1.md with content 'おはよう1'"
   target_path: "/mnt/c/tools/multi-agent-shogun/hello1.md"
   echo_message: "🔥 足軽1号、先陣を切って参る！八刃一志！"
   status: assigned
   timestamp: "2026-01-25T12:00:00"
+  # worktree: "/tmp/shogun-worktrees/subtask_001"  # B1: 設定すれば足軽はこのパスで作業
 
 # Dependent task (blocked until prerequisites complete)
 task:
@@ -558,7 +588,7 @@ If `config/settings.yaml` has no `ntfy_topic` → skip all notifications silentl
 
 > See CLAUDE.md for the escalation rule (🚨 要対応 section).
 
-Karo and Gunshi update dashboard.md. Gunshi updates during quality check aggregation (QC results section). Karo updates for task status, streaks, and action-needed items. Neither shogun nor ashigaru touch it.
+Karo updates dashboard.md for task status, QC results, streaks, and action-needed items. Neither shogun nor ashigaru touch it.
 
 | Timing | Section | Content |
 |--------|---------|---------|
@@ -659,13 +689,16 @@ STEP 5以降は不要（watcherが一括処理）
 
 Shogun needs conversation history with the lord.
 
-### Karo Self-/clear (Context Relief)
+### Karo Self-/clear (Context Relief) — B3: コンテキスト枯渇対策
 
 Karo MAY self-/clear when ALL of the following conditions are met:
 
-1. **No in_progress cmds**: All cmds in `shogun_to_karo.yaml` are `done` or `pending` (zero `in_progress`)
-2. **No active tasks**: No `queue/tasks/ashigaru*.yaml` or `queue/tasks/gunshi.yaml` with `status: assigned` or `status: in_progress`
-3. **No unread inbox**: `queue/inbox/karo.yaml` has zero `read: false` entries
+1. **No in_progress cmds**: All cmds (both `shogun_to_karo.yaml` and `queue/commands/active/`) are `done` or `pending` (zero `in_progress`)
+2. **No active tasks**: No `queue/tasks/ashigaru*.yaml` with `status: assigned` or `status: in_progress`
+3. **No unread inbox**: `queue/inbox/karo{N}.yaml` has zero `read: false` entries
+
+**B3 追加トリガー**: 3件のcmdを連続処理した場合も上記条件を満たせば self-/clear を実施する。
+(cmd処理カウンタはセッション変数 `CMD_PROCESSED_COUNT` で管理。/clear後は0リセット)
 
 When conditions met → execute self-/clear:
 ```bash
@@ -673,11 +706,14 @@ When conditions met → execute self-/clear:
 # After /clear, Session Start procedure auto-recovers from YAML
 ```
 
-**When to check**: After completing all report processing and going idle (step 12).
+**When to check**: (1) After completing all report processing and going idle (step 12). (2) After 3 consecutive cmd completions.
 
 **Why this is safe**: All state lives in YAML (ground truth). /clear only wipes conversational context, which is reconstructible from YAML scan.
 
-**Why this helps**: Prevents the 4% context exhaustion that halted karo during cmd_166 (2,754 article production).
+**Why this helps**: B3対策 — コンテキスト枯渇を予防し、cmd_166のような4%コンテキスト問題を防ぐ。
+
+**Inbox trim強化 (B3)**: slim_yaml.sh 実行後、inboxは既読メッセージをアーカイブする。
+`scripts/slim_yaml.py` が自動的に処理するため、家老は毎回step 1.5で slim_yaml.sh を実行すること。
 
 ## Redo Protocol (Task Correction)
 
@@ -749,59 +785,60 @@ tmux list-panes -t multiagent:agents -F '#{pane_index}' -f '#{==:#{@agent_id},as
 
 **When to use**: After 2 consecutive delivery failures. Normally use `multiagent:0.{N}`.
 
-## Task Routing: Ashigaru vs. Gunshi
+## B1: Git Worktree による足軽作業分離
 
-### When to Use Gunshi
+足軽が同一リポジトリで競合する場合、またはgit stashが多発する場合はworktreeを使う。
 
-Gunshi (軍師) runs on Opus Thinking and handles strategic work that needs deep reasoning.
-**Do NOT use Gunshi for implementation.** Gunshi thinks, ashigaru do.
+### いつworktreeを使うか
+
+| 状況 | worktree使用 |
+|------|------------|
+| 複数足軽が同一ファイルを編集する可能性がある | ✅ 使う |
+| 長時間のブランチ作業（HearProSupport等） | ✅ 使う |
+| 短期・読み取り専用タスク | ❌ 不要 |
+| 同一ファイルへの書き込みがないことが明確 | ❌ 不要 |
+
+### worktree付きタスク割当手順
+
+```bash
+source lib/worktree_manager.sh
+
+# 1. worktree作成
+wt_path=$(worktree_create "subtask_001" "ashigaru1")
+
+# 2. タスクYAMLにworktreeパスを設定
+#    task: { worktree: "/tmp/shogun-worktrees/subtask_001", ... }
+
+# 3. 足軽はworktree内で作業（target_pathもworktree相対で指定）
+```
+
+### worktree清掃
+
+足軽のタスク完了報告受信後、karo が削除：
+```bash
+source lib/worktree_manager.sh
+worktree_remove "subtask_001"
+```
+
+変更をメインブランチにマージしてから削除すること。
+
+## Task Routing
+
+All tasks are routed to ashigaru. Each karo manages their own 2 ashigaru.
 
 | Task Nature | Route To | Example |
 |-------------|----------|---------|
 | Implementation (L1-L3) | Ashigaru | Write code, create files, run builds |
 | Templated work (L3) | Ashigaru | SEO articles, config changes, test writing |
-| **Architecture design (L4-L6)** | **Gunshi** | System design, API design, schema design |
-| **Root cause analysis (L4)** | **Gunshi** | Complex bug investigation, performance analysis |
-| **Strategy planning (L5-L6)** | **Gunshi** | Project planning, resource allocation, risk assessment |
-| **Design evaluation (L5)** | **Gunshi** | Compare approaches, review architecture |
-| **Complex decomposition** | **Gunshi** | When Karo itself struggles to decompose a cmd |
+| Architecture design (L4-L6) | Ashigaru (with detailed instructions) | System design, API design, schema design |
+| Root cause analysis (L4) | Ashigaru (with context files) | Complex bug investigation, performance analysis |
+| Strategy planning (L5-L6) | Ashigaru (with clear criteria) | Project planning, resource allocation |
 
-### Gunshi Dispatch Procedure
+### Quality Control (QC) — Karo Direct Review
 
-```
-STEP 1: Identify need for strategic thinking (L4+, no template, multiple approaches)
-STEP 2: Write task YAML to queue/tasks/gunshi.yaml
-  - type: strategy | analysis | design | evaluation | decomposition
-  - Include all context_files the Gunshi will need
-STEP 3: Set pane task label
-  tmux set-option -p -t multiagent:0.8 @current_task "戦略立案"
-STEP 4: Send inbox
-  bash scripts/inbox_write.sh gunshi "タスクYAMLを読んで分析開始せよ。" task_assigned karo
-STEP 5: Continue dispatching other ashigaru tasks in parallel
-  → Gunshi works independently. Process its report when it arrives.
-```
+**Karo performs ALL QC directly on their own ashigaru's reports.** Ashigaru never perform QC.
 
-### Gunshi Report Processing
-
-When Gunshi completes:
-1. Read `queue/reports/gunshi_report.yaml`
-2. Use Gunshi's analysis to create/refine ashigaru task YAMLs
-3. Update dashboard.md with Gunshi's findings (if significant)
-4. Reset pane label: `tmux set-option -p -t multiagent:0.8 @current_task ""`
-
-### Gunshi Limitations
-
-- **1 task at a time** (same as ashigaru). Check if Gunshi is busy before assigning.
-- **No direct implementation**. If Gunshi says "do X", assign an ashigaru to actually do X.
-- **No dashboard access**. Gunshi's insights reach the Lord only through Karo's dashboard updates.
-
-### Quality Control (QC) Routing
-
-QC work is split between Karo and Gunshi. **Ashigaru never perform QC.**
-
-#### Simple QC → Karo Judges Directly
-
-When ashigaru reports task completion, Karo handles these checks directly (no Gunshi delegation needed):
+#### Mechanical QC (L1-L2)
 
 | Check | Method |
 |-------|--------|
@@ -810,22 +847,21 @@ When ashigaru reports task completion, Karo handles these checks directly (no Gu
 | File naming conventions | Glob pattern check |
 | done_keywords.txt consistency | Read + compare |
 
-These are mechanical checks (L1-L2) — Karo can judge pass/fail in seconds.
+These are mechanical checks — Karo can judge pass/fail in seconds.
 
-#### Complex QC → Delegate to Gunshi
+#### Judgment QC (L4-L5)
 
-Route these to Gunshi via `queue/tasks/gunshi.yaml`:
+Karo also handles higher-level QC directly:
 
-| Check | Bloom Level | Why Gunshi |
-|-------|-------------|------------|
-| Design review | L5 Evaluate | Requires architectural judgment |
-| Root cause investigation | L4 Analyze | Deep reasoning needed |
-| Architecture analysis | L5-L6 | Multi-factor evaluation |
+| Check | Method |
+|-------|--------|
+| Design review | Read deliverable, evaluate against acceptance_criteria |
+| Root cause investigation | Verify analysis logic and evidence |
+| Architecture analysis | Check consistency, trade-off coverage |
 
 #### No QC for Ashigaru
 
-**Never assign QC tasks to ashigaru.** Haiku models are unsuitable for quality judgment.
-Ashigaru handle implementation only: article creation, code changes, file operations.
+**Never assign QC tasks to ashigaru.** Ashigaru handle implementation only.
 
 ## Model Configuration
 
@@ -833,30 +869,30 @@ Ashigaru handle implementation only: article creation, code changes, file operat
 
 | Agent | Default Model | Pane | Role |
 |-------|---------------|------|------|
-| Shogun | Opus | shogun:0.0 | Project oversight |
-| Karo | Sonnet | multiagent:0.0 | Fast task management |
-| Ashigaru 1-7 | (settings.yaml参照) | multiagent:0.1-0.7 | Implementation |
-| Gunshi | Opus | multiagent:0.8 | Strategic thinking |
+| Shogun | Sonnet | shogun:0.0 | Project oversight |
+| Karo1 (karo1) | Opus | multiagent:agents.0 | Task mgmt — 足軽1,2 管轄 |
+| Karo2 | Opus | multiagent:agents.3 | Task mgmt — 足軽3,4 管轄 |
+| Karo3 | Opus | multiagent:agents.6 | Task mgmt — 足軽5,6 管轄 |
+| Ashigaru 1-2 | (settings.yaml参照) | multiagent:agents.1-2 | Implementation (karo1配下) |
+| Ashigaru 3-4 | (settings.yaml参照) | multiagent:agents.4-5 | Implementation (karo2配下) |
+| Ashigaru 5-6 | (settings.yaml参照) | multiagent:agents.7-8 | Implementation (karo3配下) |
 
-**Default: Assign implementation to ashigaru.** Route strategy/analysis to Gunshi (Opus).
+**Default: Assign all tasks to ashigaru.** Each karo performs QC directly on their ashigaru's output.
 足軽のモデルは settings.yaml で個別定義。bloom_routing: "auto" 時は Step 6.5 で動的切替を実行せよ。
 
 ### Bloom Level → Agent Mapping
 
 | Question | Level | Route To |
 |----------|-------|----------|
-| "Just searching/listing?" | L1 Remember | Ashigaru (Sonnet) |
-| "Explaining/summarizing?" | L2 Understand | Ashigaru (Sonnet) |
-| "Applying known pattern?" | L3 Apply | Ashigaru (Sonnet) |
-| **— Ashigaru / Gunshi boundary —** | | |
-| "Investigating root cause/structure?" | L4 Analyze | **Gunshi (Opus)** |
-| "Comparing options/evaluating?" | L5 Evaluate | **Gunshi (Opus)** |
-| "Designing/creating something new?" | L6 Create | **Gunshi (Opus)** |
+| "Just searching/listing?" | L1 Remember | Ashigaru |
+| "Explaining/summarizing?" | L2 Understand | Ashigaru |
+| "Applying known pattern?" | L3 Apply | Ashigaru |
+| "Investigating root cause/structure?" | L4 Analyze | Ashigaru (with detailed context) |
+| "Comparing options/evaluating?" | L5 Evaluate | Ashigaru (with clear criteria) |
+| "Designing/creating something new?" | L6 Create | Ashigaru (with constraints/examples) |
 
-**L3/L4 boundary**: Does a procedure/template exist? YES = L3 (Ashigaru). NO = L4 (Gunshi).
-
-**Exception**: If the L4+ task is simple enough (e.g., small code review), an ashigaru can handle it.
-Use Gunshi for tasks that genuinely need deep thinking — don't over-route trivial analysis.
+**L4+ tasks**: Provide extra context, acceptance criteria, and reference files in the task YAML.
+Higher Bloom levels require more detailed task descriptions to compensate for model capability.
 
 ## OSS Pull Request Review
 
