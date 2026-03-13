@@ -47,6 +47,14 @@ workflow:
     action: set_current_task
     command: 'tmux set-option -p @current_task "{task_id_short}"'
     note: "Extract task_id short form (e.g., subtask_155b → 155b, max ~15 chars)"
+  - step: 3.7
+    action: check_worktree
+    note: |
+      タスクYAMLに worktree: フィールドがあれば、そのパスを作業ディレクトリとして使う。
+      worktree パスが存在しない場合はkaro に報告してタスクを停止する。
+      worktree パスが存在する場合: 全ての git操作はそのパスで実施（PROJECT_ROOT は不変）。
+      例: task.worktree = "/tmp/shogun-worktrees/subtask_001"
+        → cd /tmp/shogun-worktrees/subtask_001 して作業
   - step: 4
     action: execute_task
   - step: 5
@@ -70,10 +78,10 @@ workflow:
     note: "If SEO project, append completed keywords to done_keywords.txt"
   - step: 9
     action: inbox_write
-    target: gunshi
+    target: own_karo
     method: "bash scripts/inbox_write.sh"
     mandatory: true
-    note: "Changed from karo to gunshi. Gunshi now handles quality check + dashboard."
+    note: "inbox_write で自隊の家老に報告。ashigaru1-2→karo, ashigaru3-4→karo2, ashigaru5-6→karo3"
   - step: 9.5
     action: check_inbox
     target: "queue/inbox/ashigaru{N}.yaml"
@@ -103,9 +111,8 @@ panes:
 
 inbox:
   write_script: "scripts/inbox_write.sh"  # See CLAUDE.md for mailbox protocol
-  to_gunshi_allowed: true
-  to_gunshi_on_completion: true  # Changed from karo to gunshi (quality check delegation)
-  to_karo_allowed: false
+  to_own_karo_allowed: true
+  to_own_karo_on_completion: true  # Report to own karo: ashigaru1-2→karo, ashigaru3-4→karo2, ashigaru5-6→karo3
   to_shogun_allowed: false
   to_user_allowed: false
   mandatory_after_completion: true
@@ -176,13 +183,17 @@ date "+%Y-%m-%dT%H:%M:%S"
 
 ## Report Notification Protocol
 
-After writing report YAML, notify Gunshi (NOT Karo):
+After writing report YAML, notify your own Karo (自隊の家老):
+
+- ashigaru1, ashigaru2 → karo
+- ashigaru3, ashigaru4 → karo2
+- ashigaru5, ashigaru6 → karo3
 
 ```bash
-bash scripts/inbox_write.sh gunshi "足軽{N}号、任務完了でござる。品質チェックを仰ぎたし。" report_received ashigaru{N}
+bash scripts/inbox_write.sh {own_karo} "足軽{N}号、任務完了でござる。報告YAML確認されたし。" report_received ashigaru{N}
 ```
 
-Gunshi now handles quality check and dashboard aggregation. No state checking, no retry, no delivery verification.
+No state checking, no retry, no delivery verification.
 The inbox_write guarantees persistence. inbox_watcher handles delivery.
 
 ## Report Format

@@ -53,6 +53,8 @@
 !lib/cli_adapter.sh
 !lib/ntfy_auth.sh
 !lib/agent_status.sh
+!lib/cmd_queue.sh
+!lib/worktree_manager.sh
 
 # Multi-CLI: Codex auto-load file
 !AGENTS.md
@@ -99,6 +101,16 @@
 !scripts/switch_cli.sh
 !scripts/pr_review_daemon.sh
 
+
+# B2: コマンドキュー分離ディレクトリ構造 (.gitkeep のみ追跡)
+!queue/
+!queue/commands/
+!queue/commands/pending/
+!queue/commands/pending/.gitkeep
+!queue/commands/active/
+!queue/commands/active/.gitkeep
+!queue/commands/done/
+!queue/commands/done/.gitkeep
 
 # SayTask (sample template only, not actual data)
 !saytask/

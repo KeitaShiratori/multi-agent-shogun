@@ -42,14 +42,14 @@ start_watcher_if_missing() {
 
 while true; do
     start_watcher_if_missing "shogun" "shogun:main.0" "logs/inbox_watcher_shogun.log"
-    start_watcher_if_missing "karo" "multiagent:agents.0" "logs/inbox_watcher_karo.log"
+    start_watcher_if_missing "karo1" "multiagent:agents.0" "logs/inbox_watcher_karo1.log"
     start_watcher_if_missing "ashigaru1" "multiagent:agents.1" "logs/inbox_watcher_ashigaru1.log"
     start_watcher_if_missing "ashigaru2" "multiagent:agents.2" "logs/inbox_watcher_ashigaru2.log"
-    start_watcher_if_missing "ashigaru3" "multiagent:agents.3" "logs/inbox_watcher_ashigaru3.log"
-    start_watcher_if_missing "ashigaru4" "multiagent:agents.4" "logs/inbox_watcher_ashigaru4.log"
-    start_watcher_if_missing "ashigaru5" "multiagent:agents.5" "logs/inbox_watcher_ashigaru5.log"
-    start_watcher_if_missing "ashigaru6" "multiagent:agents.6" "logs/inbox_watcher_ashigaru6.log"
-    start_watcher_if_missing "ashigaru7" "multiagent:agents.7" "logs/inbox_watcher_ashigaru7.log"
-    start_watcher_if_missing "gunshi" "multiagent:agents.8" "logs/inbox_watcher_gunshi.log"
+    start_watcher_if_missing "karo2" "multiagent:agents.3" "logs/inbox_watcher_karo2.log"
+    start_watcher_if_missing "ashigaru3" "multiagent:agents.4" "logs/inbox_watcher_ashigaru3.log"
+    start_watcher_if_missing "ashigaru4" "multiagent:agents.5" "logs/inbox_watcher_ashigaru4.log"
+    start_watcher_if_missing "karo3" "multiagent:agents.6" "logs/inbox_watcher_karo3.log"
+    start_watcher_if_missing "ashigaru5" "multiagent:agents.7" "logs/inbox_watcher_ashigaru5.log"
+    start_watcher_if_missing "ashigaru6" "multiagent:agents.8" "logs/inbox_watcher_ashigaru6.log"
     sleep 5
 done
