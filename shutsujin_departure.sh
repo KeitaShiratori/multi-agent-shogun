@@ -661,7 +661,9 @@ with open(f,'w') as fh: yaml.safe_dump(d, fh, default_flow_style=False, allow_un
         log_info "  └─ 将軍 settings.yaml thinking=false に設定"
     fi
     tmux set-option -p -t "shogun:main" @agent_cli "$_shogun_cli_type"
-    tmux send-keys -t shogun:main "$_shogun_cmd"
+    # 将軍startup prompt: Session Start手順を強制実行させる
+    _shogun_startup="Session Start手順を実行せよ。1)自己識別(tmux display-message) 2)mcp__memory__read_graph 3)memory/MEMORY.md読み込み 4)instructions/shogun.md読み込み 5)dashboard.md確認 6)殿の指示待機。手順完了まで殿の入力を受け付けるな。"
+    tmux send-keys -t shogun:main "$_shogun_cmd \"$_shogun_startup\""
     tmux send-keys -t shogun:main Enter
     _shogun_display=$(get_model_display_name "shogun" 2>/dev/null || echo "Opus")
     tmux set-option -p -t "shogun:main" @model_name "$_shogun_display" 2>/dev/null || true
