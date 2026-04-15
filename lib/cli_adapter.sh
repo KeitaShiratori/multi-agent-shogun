@@ -335,8 +335,8 @@ get_model_display_name() {
 
 # get_startup_prompt(agent_id)
 # CLIが初回起動時に自動実行すべき初期プロンプトを返す
-# Codex CLI: [PROMPT]引数として渡す（サジェストUI停止問題の根本対策）
-# Claude Code: 空（CLAUDE.md自動読込でSession Start手順が起動）
+# Claude Code: Session Start手順（自己識別→memory→instructions→YAML→待機）
+# Codex CLI: Session Start手順（自己識別→task YAML→inbox→作業開始）
 # Copilot/Kimi: 空（今後対応）
 get_startup_prompt() {
     local agent_id="$1"
@@ -344,6 +344,11 @@ get_startup_prompt() {
     cli_type=$(get_cli_type "$agent_id")
 
     case "$cli_type" in
+        claude)
+            # Claude Code: CLAUDE.md は自動ロードされるが、Session Start手順は
+            # ユーザー入力がないと実行されない。startup promptで明示的に起動する。
+            echo "Session Start手順を実行せよ。1)自己識別(tmux display-message) 2)mcp__memory__read_graph 3)memory/MEMORY.md読み込み 4)instructions/shogun.md読み込み(shogunの場合) or instructions/karo.md(karoの場合) or instructions/ashigaru.md(ashigaruの場合) 5)dashboard.md確認(shogunのみ) or queue/tasks/${agent_id}.yaml確認(karo/ashigaru) 6)指示待機 or タスク実行。手順完了まで処理を開始するな。"
+            ;;
         codex)
             echo "Session Start — do ALL of this in one turn, do NOT stop early: 1) tmux display-message -t \"\$TMUX_PANE\" -p '#{@agent_id}' to identify yourself. 2) Read queue/tasks/${agent_id}.yaml. 3) Read queue/inbox/${agent_id}.yaml, mark read:true. 4) Read files listed in context_files. 5) Execute the assigned task to completion — edit files, run commands, write reports. Keep working until the task is done."
             ;;

@@ -554,6 +554,31 @@ send_cli_command() {
     if [[ "$actual_cmd" == "/clear" ]]; then
         LAST_CLEAR_TS=$(date +%s)
         sleep 3
+        # Claude Code: after /clear, send startup prompt so agents re-load their role.
+        # (CLAUDE.md is auto-loaded but Session Start needs an explicit prompt trigger.)
+        if [[ "$effective_cli" == "claude" ]]; then
+            local _post_clear_prompt=""
+            if type get_startup_prompt &>/dev/null; then
+                _post_clear_prompt=$(get_startup_prompt "$AGENT_ID" 2>/dev/null || true)
+            fi
+            if [[ -n "$_post_clear_prompt" ]]; then
+                # Wait for idle after /clear
+                local _pc_attempt
+                for _pc_attempt in 1 2 3; do
+                    sleep 5
+                    if ! agent_is_busy; then
+                        echo "[$(date)] [STARTUP] $AGENT_ID idle after /clear — sending startup prompt" >&2
+                        break
+                    fi
+                done
+                timeout 5 tmux send-keys -t "$PANE_TARGET" C-u 2>/dev/null || true
+                sleep 0.3
+                timeout 5 tmux send-keys -l -t "$PANE_TARGET" "$_post_clear_prompt" 2>/dev/null || true
+                sleep 0.3
+                timeout 5 tmux send-keys -t "$PANE_TARGET" Enter 2>/dev/null || true
+                echo "[$(date)] [STARTUP] Post-/clear startup prompt sent to $AGENT_ID" >&2
+            fi
+        fi
     else
         sleep 1
     fi
@@ -1129,6 +1154,36 @@ process_unread_once() {
 
 # ─── Startup & Main loop (skipped in testing mode) ───
 if [ "${__INBOX_WATCHER_TESTING__:-}" != "1" ]; then
+
+# ─── Startup: send Session Start prompt for Claude Code agents ───
+# Claude Code does NOT auto-execute Session Start on launch — it waits for user input.
+# We must explicitly send the startup prompt so agents load their role instructions.
+# Codex handles this separately via send_codex_startup_prompt() on /new.
+if [[ "$CLI_TYPE" == "claude" ]]; then
+    _startup_prompt=""
+    if type get_startup_prompt &>/dev/null; then
+        _startup_prompt=$(get_startup_prompt "$AGENT_ID" 2>/dev/null || true)
+    fi
+    if [[ -n "$_startup_prompt" ]]; then
+        # Wait up to 15s for Claude Code to reach idle (welcome screen)
+        _startup_attempt=0
+        while [ "$_startup_attempt" -lt 3 ]; do
+            sleep 5
+            _startup_attempt=$((_startup_attempt + 1))
+            if ! agent_is_busy; then
+                echo "[$(date)] [STARTUP] $AGENT_ID idle after ${_startup_attempt}×5s — sending claude startup prompt" >&2
+                break
+            fi
+            echo "[$(date)] [STARTUP] $AGENT_ID still busy after ${_startup_attempt}×5s — retrying" >&2
+        done
+        timeout 5 tmux send-keys -t "$PANE_TARGET" C-u 2>/dev/null || true
+        sleep 0.3
+        timeout 5 tmux send-keys -l -t "$PANE_TARGET" "$_startup_prompt" 2>/dev/null || true
+        sleep 0.3
+        timeout 5 tmux send-keys -t "$PANE_TARGET" Enter 2>/dev/null || true
+        echo "[$(date)] [STARTUP] Claude startup prompt sent to $AGENT_ID" >&2
+    fi
+fi
 
 # ─── Startup: process any existing unread messages ───
 process_unread_once
