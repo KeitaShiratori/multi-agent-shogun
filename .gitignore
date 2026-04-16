@@ -164,6 +164,8 @@
 !skills/api-schema-layer-separation/SKILL.md
 !skills/lambda-shared-zod-delivery/
 !skills/lambda-shared-zod-delivery/SKILL.md
+!skills/boundary-parse-readiness-check-v2/
+!skills/boundary-parse-readiness-check-v2/SKILL.md
 
 # Python venv (explicit deny — whitelist patterns like LICENSE leak through !*/)
 .venv/
