@@ -166,6 +166,8 @@
 !skills/lambda-shared-zod-delivery/SKILL.md
 !skills/boundary-parse-readiness-check-v2/
 !skills/boundary-parse-readiness-check-v2/SKILL.md
+!skills/mysql-driver-type-drift-boundary-coerce/
+!skills/mysql-driver-type-drift-boundary-coerce/SKILL.md
 
 # Python venv (explicit deny — whitelist patterns like LICENSE leak through !*/)
 .venv/
