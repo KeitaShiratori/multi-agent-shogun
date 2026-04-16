@@ -162,6 +162,8 @@
 !skills/api-schema-dao-derivation/SKILL.md
 !skills/api-schema-layer-separation/
 !skills/api-schema-layer-separation/SKILL.md
+!skills/lambda-shared-zod-delivery/
+!skills/lambda-shared-zod-delivery/SKILL.md
 
 # Python venv (explicit deny — whitelist patterns like LICENSE leak through !*/)
 .venv/
